@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Мои задачи</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E9EDF1; --surface:#FFFFFF; --ink:#18232E; --muted:#5C6B79; --line:#D3DAE1;
+  --accent:#2D5B86; --accent-ink:#FFFFFF; --hot:#B8452F; --warm:#B07A12; --ok:#3C7A55;
+  --chip:#E1E7ED;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#121A22; --surface:#1A242E; --ink:#E4EAF0; --muted:#93A2B0; --line:#2B3846;
+    --accent:#7FAEDB; --accent-ink:#0E1620; --hot:#E58A74; --warm:#D9A94A; --ok:#7BC496;
+    --chip:#24313D; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#121A22; --surface:#1A242E; --ink:#E4EAF0; --muted:#93A2B0; --line:#2B3846;
+  --accent:#7FAEDB; --accent-ink:#0E1620; --hot:#E58A74; --warm:#D9A94A; --ok:#7BC496;
+  --chip:#24313D; color-scheme:dark;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Golos Text",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:820px;margin:0 auto;padding:32px 20px 64px}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:24px}
+h1{font:700 clamp(2rem,6vw,3.2rem)/1 "Unbounded","Golos Text",system-ui,sans-serif;margin:0;letter-spacing:-.02em}
+.tally{color:var(--muted);font-size:.95rem;margin-top:8px}
+.tally b{color:var(--ink);font-weight:600}
+.status-line{font-size:.85rem;color:var(--muted);display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.dot.ok{background:var(--ok)} .dot.busy{background:var(--warm)} .dot.local{background:var(--hot)}
+
+.add{display:grid;grid-template-columns:1fr auto auto auto;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:8px}
+.add input,.add select{font:inherit;color:var(--ink);background:transparent;border:0;padding:10px 12px;border-radius:9px;min-width:0}
+.add input[type=text]{font-size:1.05rem}
+.add input:focus-visible,.add select:focus-visible{outline:2px solid var(--accent);outline-offset:0}
+.btn{font:600 .95rem "Golos Text",system-ui,sans-serif;border:0;border-radius:9px;padding:10px 16px;cursor:pointer;background:var(--accent);color:var(--accent-ink)}
+.btn:focus-visible,.ghost:focus-visible,.tab:focus-visible,.check:focus-visible,.row-main:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (max-width:620px){.add{grid-template-columns:1fr 1fr}.add input[type=text]{grid-column:1/-1}.add .btn{grid-column:1/-1}}
+
+.bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:22px 0 10px}
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tab{font:500 .92rem "Golos Text",system-ui,sans-serif;background:transparent;color:var(--muted);border:1px solid transparent;border-radius:999px;padding:6px 14px;cursor:pointer}
+.tab[aria-pressed="true"]{background:var(--surface);color:var(--ink);border-color:var(--line)}
+.search{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:7px 14px;width:200px;max-width:100%}
+
+ul.list{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+li.task{border-bottom:1px solid var(--line)}
+.row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;padding:12px 4px}
+.check{width:22px;height:22px;border-radius:6px;border:2px solid var(--muted);background:transparent;cursor:pointer;display:grid;place-items:center;padding:0;color:var(--accent-ink)}
+.task[data-status="doing"] .check{border-color:var(--warm);background:linear-gradient(90deg,var(--warm) 50%,transparent 50%)}
+.task[data-status="done"] .check{border-color:var(--ok);background:var(--ok)}
+.row-main{background:none;border:0;padding:0;text-align:left;color:inherit;font:inherit;cursor:pointer;min-width:0}
+.title{display:block;font-weight:500;overflow-wrap:anywhere}
+.task[data-status="done"] .title{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}
+.meta{display:flex;gap:10px;flex-wrap:wrap;font-size:.83rem;color:var(--muted);margin-top:2px}
+.meta .late{color:var(--hot);font-weight:600}
+.prio{width:4px;align-self:stretch;border-radius:2px}
+.prio.p3{background:var(--hot)} .prio.p2{background:var(--warm)} .prio.p1{background:transparent}
+
+.editor{display:none;padding:4px 4px 18px 46px;gap:10px;grid-template-columns:repeat(4,minmax(0,1fr))}
+.task.open .editor{display:grid}
+.editor label{display:flex;flex-direction:column;gap:4px;font-size:.8rem;color:var(--muted)}
+.editor input,.editor select,.editor textarea{font:inherit;font-size:.95rem;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+.editor .wide{grid-column:1/-1}
+.editor textarea{min-height:80px;resize:vertical}
+.editor .actions{grid-column:1/-1;display:flex;justify-content:space-between;gap:8px}
+.ghost{font:500 .9rem "Golos Text",system-ui,sans-serif;background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
+.ghost.danger{color:var(--hot)}
+@media (max-width:620px){.editor{grid-template-columns:1fr 1fr;padding-left:4px}}
+
+.empty{padding:48px 8px;color:var(--muted);text-align:center}
+footer{margin-top:28px;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+@media (prefers-reduced-motion:no-preference){.task.open .editor{animation:drop .16s ease-out}@keyframes drop{from{opacity:0;transform:translateY(-4px)}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Мои задачи</h1>
+      <div class="tally" id="tally"></div>
+    </div>
+    <div class="status-line" aria-live="polite"><span class="dot" id="dot"></span><span id="saveText">Загрузка…</span></div>
+  </header>
+
+  <form class="add" id="addForm" autocomplete="off">
+    <label class="sr" for="newTitle">Новая задача</label>
+    <input type="text" id="newTitle" placeholder="Что нужно сделать?" required>
+    <label class="sr" for="newPrio">Приоритет</label>
+    <select id="newPrio"><option value="1">Обычный</option><option value="2">Важно</option><option value="3">Срочно</option></select>
+    <label class="sr" for="newDue">Срок</label>
+    <input type="date" id="newDue">
+    <button class="btn" type="submit">Добавить</button>
+  </form>
+
+  <div class="bar">
+    <div class="tabs" role="group" aria-label="Фильтр">
+      <button class="tab" data-f="active" aria-pressed="true">Активные</button>
+      <button class="tab" data-f="todo" aria-pressed="false">Сделать</button>
+      <button class="tab" data-f="doing" aria-pressed="false">В работе</button>
+      <button class="tab" data-f="done" aria-pressed="false">Готово</button>
+      <button class="tab" data-f="all" aria-pressed="false">Все</button>
+    </div>
+    <input class="search" id="search" type="search" placeholder="Поиск" aria-label="Поиск по задачам">
+  </div>
+
+  <ul class="list" id="list"></ul>
+
+  <footer>
+    <button class="ghost" id="exportBtn" type="button">Скачать резервную копию</button>
+    <button class="ghost" id="importBtn" type="button">Загрузить из копии</button>
+    <input type="file" id="importFile" accept="application/json,.json" hidden>
+  </footer>
+</div>
+
+<script>
+// ====== НАСТРОЙКА: вставьте сюда данные своего проекта Supabase (шаг 4 инструкции) ======
+const SUPABASE_URL = "https://fqpxsjkvnirasbxddfsd.supabase.co";
+const SUPABASE_KEY = "sb_publishable_rihZZK_jxt8op5YY-H5bAg_QLEoO3Jv";
+// =========================================================================================
+
+const LS_KEY = "my-task-tracker-v1";
+const STATUS = {todo:"Сделать", doing:"В работе", done:"Готово"};
+const NEXT = {todo:"doing", doing:"done", done:"todo"};
+let state = {tasks: []};
+let filter = "active", query = "", openId = null;
+
+const $ = s => document.querySelector(s);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+const today = () => new Date().toISOString().slice(0,10);
+const configured = !SUPABASE_URL.includes("ВСТАВЬТЕ") && !SUPABASE_KEY.includes("ВСТАВЬТЕ");
+const db = (configured && window.supabase) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+
+function setStatus(kind, text){ $("#dot").className = "dot " + kind; $("#saveText").textContent = text; }
+function saveLocal(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){} }
+function loadLocal(){ try{ const d = JSON.parse(localStorage.getItem(LS_KEY)); if(d && Array.isArray(d.tasks)) return d; }catch(e){} return null; }
+
+const toRow = t => ({id:t.id, title:t.title, status:t.status, prio:t.prio, due:t.due||null, project:t.project||"", notes:t.notes||"", created:t.created, done_at:t.doneAt||null});
+const fromRow = r => ({id:r.id, title:r.title, status:r.status, prio:r.prio, due:r.due||"", project:r.project||"", notes:r.notes||"", created:Number(r.created), doneAt:r.done_at?Number(r.done_at):null});
+
+// ---- Работа с базой ----
+async function run(req){
+  saveLocal();
+  if(!db){ setStatus("local","База не подключена — данные только в этом браузере"); return; }
+  setStatus("busy","Сохраняю…");
+  const {error} = await req();
+  if(error){ setStatus("local","Не сохранилось: " + error.message); refresh(); return; }
+  setStatus("ok","Сохранено");
+}
+function saveTask(t){ render(); return run(()=>db.from("tasks").upsert(toRow(t))); }
+function removeTask(id){ state.tasks = state.tasks.filter(x=>x.id!==id); render(); return run(()=>db.from("tasks").delete().eq("id", id)); }
+
+let pending = false;
+const editing = () => document.activeElement && document.activeElement.closest && document.activeElement.closest(".editor, .add");
+async function refresh(){
+  if(!db) return;
+  const {data, error} = await db.from("tasks").select("*");
+  if(error){ setStatus("local","Нет связи с базой: " + error.message); return; }
+  state.tasks = data.map(fromRow); saveLocal();
+  if(editing()) pending = true; else render();
+  setStatus("ok","Сохранено");
+}
+let refreshTimer = null;
+function scheduleRefresh(){ clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 300); }
+document.addEventListener("focusout", ()=>setTimeout(()=>{ if(pending && !editing()){ pending=false; render(); } }, 0));
+
+// ---- Отображение ----
+function fmtDate(iso){ if(!iso) return ""; const [y,m,d]=iso.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("ru-RU",{day:"numeric",month:"short"}); }
+function visible(){
+  const q = query.trim().toLowerCase();
+  return state.tasks.filter(t=>{
+    if(filter==="active" && t.status==="done") return false;
+    if(["todo","doing","done"].includes(filter) && t.status!==filter) return false;
+    if(q && !(t.title+" "+(t.project||"")+" "+(t.notes||"")).toLowerCase().includes(q)) return false;
+    return true;
+  }).sort((a,b)=>{
+    const so={doing:0,todo:1,done:2};
+    if(so[a.status]!==so[b.status]) return so[a.status]-so[b.status];
+    if(b.prio!==a.prio) return b.prio-a.prio;
+    if((a.due||"9")!==(b.due||"9")) return (a.due||"9")<(b.due||"9")?-1:1;
+    return b.created-a.created;
+  });
+}
+function el(tag, attrs={}, ...kids){
+  const n=document.createElement(tag);
+  for(const [k,v] of Object.entries(attrs)){
+    if(k==="class") n.className=v; else if(k.startsWith("on")) n.addEventListener(k.slice(2),v);
+    else if(k==="text") n.textContent=v; else n.setAttribute(k,v);
+  }
+  kids.flat().forEach(c=>c!=null&&n.append(c)); return n;
+}
+function render(){
+  const all=state.tasks, cnt=s=>all.filter(t=>t.status===s).length;
+  const late=all.filter(t=>t.status!=="done"&&t.due&&t.due<today()).length;
+  const tally=$("#tally"); tally.innerHTML="";
+  tally.append(el("b",{text:String(cnt("todo")+cnt("doing"))})," активных, ",el("b",{text:String(cnt("doing"))})," в работе, ",el("b",{text:String(cnt("done"))})," готово",
+    late?el("span",{text:` — просрочено: ${late}`,style:"color:var(--hot)"}):null);
+  const list=$("#list"); list.innerHTML="";
+  const items=visible();
+  if(!items.length){ list.append(el("li",{class:"empty",text:all.length?"Ничего не найдено. Поменяйте фильтр или поиск.":"Задач пока нет. Добавьте первую в поле выше."})); return; }
+  for(const t of items){
+    const isLate=t.status!=="done"&&t.due&&t.due<today();
+    const meta=el("span",{class:"meta"},el("span",{text:STATUS[t.status]}),t.project?el("span",{text:t.project}):null,
+      t.due?el("span",{class:isLate?"late":"",text:(isLate?"просрочено, ":"до ")+fmtDate(t.due)}):null,t.notes?el("span",{text:"есть заметка"}):null);
+    list.append(el("li",{class:"task"+(openId===t.id?" open":""),"data-status":t.status},
+      el("div",{class:"row"},
+        el("button",{class:"check",type:"button","aria-label":`Статус: ${STATUS[t.status]}. Нажмите, чтобы сменить`,onclick:()=>{t.status=NEXT[t.status]; t.doneAt=t.status==="done"?Date.now():null; saveTask(t);}}),
+        el("button",{class:"row-main",type:"button","aria-expanded":String(openId===t.id),onclick:()=>{openId=openId===t.id?null:t.id; render();}},el("span",{class:"title",text:t.title}),meta),
+        el("span",{class:"prio p"+t.prio,"aria-hidden":"true"})),
+      editor(t)));
+  }
+}
+function editor(t){
+  const upd=(k,v)=>{ t[k]=v; saveTask(t); };
+  const sel=(opts,val,k)=>el("select",{onchange:e=>upd(k,k==="prio"?Number(e.target.value):e.target.value)},
+    ...Object.entries(opts).map(([v,l])=>{const o=el("option",{value:v,text:l}); if(String(val)===v) o.selected=true; return o;}));
+  return el("div",{class:"editor"},
+    el("label",{class:"wide"},"Название",el("input",{type:"text",value:t.title,onchange:e=>{const v=e.target.value.trim(); if(v) upd("title",v);}})),
+    el("label",{},"Статус",sel(STATUS,t.status,"status")),
+    el("label",{},"Приоритет",sel({1:"Обычный",2:"Важно",3:"Срочно"},t.prio,"prio")),
+    el("label",{},"Срок",el("input",{type:"date",value:t.due||"",onchange:e=>upd("due",e.target.value)})),
+    el("label",{},"Проект",el("input",{type:"text",value:t.project||"",placeholder:"Например, «Дом»",onchange:e=>upd("project",e.target.value.trim())})),
+    el("label",{class:"wide"},"Заметки",el("textarea",{onchange:e=>upd("notes",e.target.value)},t.notes||"")),
+    el("div",{class:"actions"},
+      el("button",{class:"ghost danger",type:"button",onclick:()=>{ if(confirm(`Удалить задачу «${t.title}»?`)){ openId=null; removeTask(t.id); } },text:"Удалить"}),
+      el("button",{class:"ghost",type:"button",onclick:()=>{openId=null; render();},text:"Свернуть"})));
+}
+
+// ---- Управление ----
+$("#addForm").addEventListener("submit", e=>{
+  e.preventDefault();
+  const title=$("#newTitle").value.trim(); if(!title) return;
+  const t={id:uid(),title,status:"todo",prio:Number($("#newPrio").value),due:$("#newDue").value,project:"",notes:"",created:Date.now(),doneAt:null};
+  state.tasks.push(t);
+  $("#newTitle").value=""; $("#newDue").value=""; $("#newPrio").value="1";
+  if(filter==="done") setFilter("active");
+  saveTask(t); $("#newTitle").focus();
+});
+function setFilter(f){ filter=f; document.querySelectorAll(".tab").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.f===f))); render(); }
+document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>setFilter(b.dataset.f)));
+$("#search").addEventListener("input", e=>{ query=e.target.value; render(); });
+
+$("#exportBtn").addEventListener("click", ()=>{
+  const a=el("a",{href:URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:"application/json"})),download:`zadachi-${today()}.json`});
+  document.body.append(a); a.click(); a.remove();
+});
+$("#importBtn").addEventListener("click", ()=>$("#importFile").click());
+$("#importFile").addEventListener("change", e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=async ()=>{
+    e.target.value="";
+    let d; try{ d=JSON.parse(r.result); if(!Array.isArray(d.tasks)) throw 0; }
+    catch(err){ alert("Файл не похож на резервную копию трекера. Выберите файл .json, скачанный кнопкой «Скачать резервную копию»."); return; }
+    if(!confirm(`Заменить текущие задачи (${state.tasks.length}) задачами из файла (${d.tasks.length})?`)) return;
+    state.tasks=d.tasks; render();
+    await run(()=>db.from("tasks").delete().neq("id",""));
+    if(d.tasks.length) await run(()=>db.from("tasks").insert(d.tasks.map(toRow)));
+  };
+  r.readAsText(f);
+});
+
+// ---- Запуск ----
+const local=loadLocal(); if(local) state=local;
+render();
+if(!db){
+  setStatus("local", configured ? "Не удалось загрузить Supabase — данные только в этом браузере" : "База не подключена — данные только в этом браузере");
+}else{
+  setStatus("busy","Загрузка…");
+  refresh();
+  db.channel("tasks-live").on("postgres_changes",{event:"*",schema:"public",table:"tasks"},scheduleRefresh).subscribe();
+  document.addEventListener("visibilitychange",()=>{ if(!document.hidden) scheduleRefresh(); });
+}
+</script>
+</body>
+</html>
