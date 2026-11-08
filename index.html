@@ -85,6 +85,20 @@ li.task{border-bottom:1px solid var(--line)}
 footer{margin-top:28px;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 @media (prefers-reduced-motion:no-preference){.task.open .editor{animation:drop .16s ease-out}@keyframes drop{from{opacity:0;transform:translateY(-4px)}}}
+
+.parsed{min-height:1.4em;margin:8px 4px 0;font-size:.85rem;color:var(--muted)}
+.parsed b{color:var(--accent);font-weight:600}
+.hint-ex{color:var(--muted)}
+.task.today .title::after{content:"сегодня";margin-left:8px;font-size:.72rem;font-weight:600;color:var(--accent);border:1px solid currentColor;border-radius:999px;padding:0 7px;vertical-align:2px}
+.task[data-status="done"] .title::after{display:none}
+.checklist{grid-column:1/-1;display:flex;flex-direction:column;gap:4px}
+.ci{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center}
+.ci input[type=checkbox]{width:18px;height:18px;accent-color:var(--ok);margin:0}
+.ci.done input[type=text]{color:var(--muted);text-decoration:line-through}
+.ci .x{background:none;border:0;color:var(--muted);font-size:1.1rem;cursor:pointer;padding:4px 8px;border-radius:6px}
+.ci .x:focus-visible{outline:2px solid var(--accent)}
+.ci-add{display:grid;grid-template-columns:1fr auto;gap:8px}
+.cap{font-size:.8rem;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -106,9 +120,11 @@ footer{margin-top:28px;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-
     <input type="date" id="newDue">
     <button class="btn" type="submit">Добавить</button>
   </form>
+  <div class="parsed" id="parsed" aria-live="polite"><span class="hint-ex">Можно писать сразу с датой: «завтра в 18:00 плавание», «в пятницу отчёт #работа», «25.12 подарки !»</span></div>
 
   <div class="bar">
     <div class="tabs" role="group" aria-label="Фильтр">
+      <button class="tab" data-f="today" aria-pressed="false">Сегодня</button>
       <button class="tab" data-f="active" aria-pressed="true">Активные</button>
       <button class="tab" data-f="todo" aria-pressed="false">Сделать</button>
       <button class="tab" data-f="doing" aria-pressed="false">В работе</button>
@@ -128,20 +144,22 @@ footer{margin-top:28px;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-
 </div>
 
 <script>
-// ====== НАСТРОЙКА: вставьте сюда данные своего проекта Supabase (шаг 4 инструкции) ======
+// ====== НАСТРОЙКА: вставьте сюда данные своего проекта Supabase ======
 const SUPABASE_URL = "https://fqpxsjkvnirasbxddfsd.supabase.co";
 const SUPABASE_KEY = "sb_publishable_rihZZK_jxt8op5YY-H5bAg_QLEoO3Jv";
-// =========================================================================================
+// ======================================================================
 
 const LS_KEY = "my-task-tracker-v1";
 const STATUS = {todo:"Сделать", doing:"В работе", done:"Готово"};
 const NEXT = {todo:"doing", doing:"done", done:"todo"};
 let state = {tasks: []};
-let filter = "active", query = "", openId = null;
+let filter = "active", query = "", openId = null, refocus = null;
 
 const $ = s => document.querySelector(s);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
-const today = () => new Date().toISOString().slice(0,10);
+const pad = n => String(n).padStart(2,"0");
+const iso = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const today = () => iso(new Date());
 const configured = !SUPABASE_URL.includes("ВСТАВЬТЕ") && !SUPABASE_KEY.includes("ВСТАВЬТЕ");
 const db = (configured && window.supabase) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
@@ -149,10 +167,75 @@ function setStatus(kind, text){ $("#dot").className = "dot " + kind; $("#saveTex
 function saveLocal(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){} }
 function loadLocal(){ try{ const d = JSON.parse(localStorage.getItem(LS_KEY)); if(d && Array.isArray(d.tasks)) return d; }catch(e){} return null; }
 
-const toRow = t => ({id:t.id, title:t.title, status:t.status, prio:t.prio, due:t.due||null, project:t.project||"", notes:t.notes||"", created:t.created, done_at:t.doneAt||null});
-const fromRow = r => ({id:r.id, title:r.title, status:r.status, prio:r.prio, due:r.due||"", project:r.project||"", notes:r.notes||"", created:Number(r.created), doneAt:r.done_at?Number(r.done_at):null});
+const norm = t => Object.assign({time:"", checklist:[]}, t, {checklist: Array.isArray(t.checklist) ? t.checklist : []});
+const toRow = t => ({id:t.id, title:t.title, status:t.status, prio:t.prio, due:t.due||null, time:t.time||null, project:t.project||"", notes:t.notes||"", checklist:t.checklist||[], created:t.created, done_at:t.doneAt||null});
+const fromRow = r => norm({id:r.id, title:r.title, status:r.status, prio:r.prio, due:r.due||"", time:r.time?String(r.time).slice(0,5):"", project:r.project||"", notes:r.notes||"", checklist:r.checklist||[], created:Number(r.created), doneAt:r.done_at?Number(r.done_at):null});
 
-// ---- Работа с базой ----
+// ---------- Разбор быстрого ввода ----------
+const MONTHS = ["январ","феврал","март","апрел","ма","июн","июл","август","сентябр","октябр","ноябр","декабр"];
+const WD = [["вс","воскресенье","воскресенья"],["пн","понедельник","понедельника"],["вт","вторник","вторника"],["ср","среда","среду","среды"],["чт","четверг","четверга"],["пт","пятница","пятницу","пятницы"],["сб","суббота","субботу","субботы"]];
+function monthIndex(word){ word=word.toLowerCase(); return MONTHS.findIndex(p => word.startsWith(p) && (p!=="ма" || word==="мая" || word==="май")); }
+function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+
+function parseQuick(input){
+  let text = " " + input + " ";
+  const res = {due:"", time:"", project:"", prio:0};
+  const cut = re => { const m = text.match(re); if(m){ text = text.replace(m[0]," "); } return m; };
+  const now = new Date(); now.setHours(0,0,0,0);
+  let m;
+
+  if((m = cut(/\s#([\p{L}\p{N}_-]+)/u))) res.project = m[1];
+  if((m = cut(/\s(!{1,3})(?=\s)/))) res.prio = m[1].length===1 ? 3 : (m[1].length===2 ? 2 : 1);
+  if((m = cut(/\s!([123])(?=\s)/))) res.prio = Number(m[1]);
+
+  // время: «в 18:00», «18:00», «в 9», «в 9 утра/вечера», «в 18.30»
+  if((m = cut(/\s(?:в\s+)?([01]?\d|2[0-3])[:.]([0-5]\d)(?=\s)/i))) res.time = pad(m[1])+":"+m[2];
+  else if((m = cut(/\sв\s+([01]?\d|2[0-3])(?:\s*ч(?:ас(?:а|ов)?)?)?(?:\s+(утра|дня|вечера|ночи))?(?=\s)/i))){
+    let h = Number(m[1]); const part = (m[2]||"").toLowerCase();
+    if((part==="вечера"||part==="дня") && h<12) h+=12;
+    if(part==="ночи" && h===12) h=0;
+    res.time = pad(h)+":00";
+  }
+
+  // дата
+  if((m = cut(/\s(сегодня)(?=\s)/i))) res.due = iso(now);
+  else if((m = cut(/\s(послезавтра)(?=\s)/i))) res.due = iso(addDays(now,2));
+  else if((m = cut(/\s(завтра)(?=\s)/i))) res.due = iso(addDays(now,1));
+  else if((m = cut(/\sчерез\s+(\d+|один|одну|два|две|три|неделю)\s*(день|дня|дней|недел[юиь]|недели)?(?=\s)/i))){
+    const words = {"один":1,"одну":1,"два":2,"две":2,"три":3,"неделю":1};
+    const n = words[m[1].toLowerCase()] || Number(m[1]);
+    const unit = (m[2]||(m[1].toLowerCase()==="неделю"?"неделю":"день")).toLowerCase();
+    res.due = iso(addDays(now, unit.startsWith("недел") ? n*7 : n));
+  }
+  else if((m = cut(/\s(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?(?=\s)/))){
+    let y = m[3] ? Number(m[3].length===2 ? "20"+m[3] : m[3]) : now.getFullYear();
+    let d = new Date(y, Number(m[2])-1, Number(m[1]));
+    if(!m[3] && d < now) d = new Date(y+1, Number(m[2])-1, Number(m[1]));
+    if(!isNaN(d) && d.getDate()===Number(m[1])) res.due = iso(d);
+  }
+  else if((m = text.match(/\s(\d{1,2})\s+([а-яё]+)(?=\s)/i)) && monthIndex(m[2])>=0){
+    text = text.replace(m[0]," ");
+    const mi = monthIndex(m[2]);
+    let d = new Date(now.getFullYear(), mi, Number(m[1]));
+    if(d < now) d = new Date(now.getFullYear()+1, mi, Number(m[1]));
+    res.due = iso(d);
+  }
+  else {
+    const wdRe = new RegExp("\\s(?:во?\\s+)?(" + WD.flat().join("|") + ")(?=\\s)","i");
+    if((m = cut(wdRe))){
+      const w = m[1].toLowerCase();
+      const target = WD.findIndex(list => list.includes(w));
+      let diff = (target - now.getDay() + 7) % 7; if(diff===0) diff = 7;
+      res.due = iso(addDays(now, diff));
+    }
+  }
+  if(res.time && !res.due) res.due = iso(now);
+
+  res.title = text.replace(/\s+[—–-]+\s+/g," ").replace(/\s+/g," ").trim().replace(/^[—–:,.-]+\s*|\s*[—–:,-]+$/g,"");
+  return res;
+}
+
+// ---------- Работа с базой ----------
 async function run(req){
   saveLocal();
   if(!db){ setStatus("local","База не подключена — данные только в этом браузере"); return; }
@@ -178,51 +261,112 @@ let refreshTimer = null;
 function scheduleRefresh(){ clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 300); }
 document.addEventListener("focusout", ()=>setTimeout(()=>{ if(pending && !editing()){ pending=false; render(); } }, 0));
 
-// ---- Отображение ----
-function fmtDate(iso){ if(!iso) return ""; const [y,m,d]=iso.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("ru-RU",{day:"numeric",month:"short"}); }
+// ---------- Календарь (.ics) ----------
+function icsEscape(s){ return String(s||"").replace(/\\/g,"\\\\").replace(/\n/g,"\\n").replace(/[,;]/g,m=>"\\"+m); }
+function downloadIcs(t){
+  if(!t.due) return;
+  const d = t.due.replace(/-/g,"");
+  const stamp = new Date().toISOString().replace(/[-:]/g,"").replace(/\.\d+Z$/,"Z");
+  let when, alarm;
+  if(t.time){
+    const [h,mi] = t.time.split(":").map(Number);
+    const end = new Date(0,0,1,h,mi+30);
+    const endDay = end.getDate()===1 ? d : t.due.replace(/-/g,"");
+    when = `DTSTART:${d}T${pad(h)}${pad(mi)}00\r\nDTEND:${endDay}T${pad(end.getHours())}${pad(end.getMinutes())}00`;
+    alarm = "TRIGGER:-PT10M";
+  } else {
+    const next = iso(addDays(new Date(t.due+"T00:00"),1)).replace(/-/g,"");
+    when = `DTSTART;VALUE=DATE:${d}\r\nDTEND;VALUE=DATE:${next}`;
+    alarm = "TRIGGER;RELATED=START:PT9H";
+  }
+  const notes = [t.notes, ...(t.checklist||[]).map(c=>(c.done?"✓ ":"• ")+c.text)].filter(Boolean).join("\n");
+  const ics = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//my-tasks//RU","CALSCALE:GREGORIAN","BEGIN:VEVENT",
+    `UID:${t.id}@my-tasks`,`DTSTAMP:${stamp}`, when, `SUMMARY:${icsEscape(t.title)}`,
+    notes ? `DESCRIPTION:${icsEscape(notes)}` : null,
+    "BEGIN:VALARM","ACTION:DISPLAY",`DESCRIPTION:${icsEscape(t.title)}`, alarm,"END:VALARM",
+    "END:VEVENT","END:VCALENDAR"].filter(Boolean).join("\r\n");
+  const a = el("a",{href:URL.createObjectURL(new Blob([ics],{type:"text/calendar;charset=utf-8"})),download:`zadacha-${t.due}.ics`});
+  document.body.append(a); a.click(); a.remove();
+}
+
+// ---------- Отображение ----------
+function fmtDate(isoStr){
+  if(!isoStr) return "";
+  if(isoStr===today()) return "сегодня";
+  if(isoStr===iso(addDays(new Date(),1))) return "завтра";
+  const [y,m,d]=isoStr.split("-").map(Number);
+  return new Date(y,m-1,d).toLocaleDateString("ru-RU",{weekday:"short",day:"numeric",month:"short"});
+}
 function visible(){
-  const q = query.trim().toLowerCase();
+  const q = query.trim().toLowerCase(), t0 = today();
   return state.tasks.filter(t=>{
+    if(filter==="today" && (t.status==="done" || !t.due || t.due>t0)) return false;
     if(filter==="active" && t.status==="done") return false;
     if(["todo","doing","done"].includes(filter) && t.status!==filter) return false;
-    if(q && !(t.title+" "+(t.project||"")+" "+(t.notes||"")).toLowerCase().includes(q)) return false;
+    if(q && !(t.title+" "+(t.project||"")+" "+(t.notes||"")+" "+(t.checklist||[]).map(c=>c.text).join(" ")).toLowerCase().includes(q)) return false;
     return true;
   }).sort((a,b)=>{
     const so={doing:0,todo:1,done:2};
     if(so[a.status]!==so[b.status]) return so[a.status]-so[b.status];
+    const ka=(a.due||"9999")+(a.time||"99"), kb=(b.due||"9999")+(b.time||"99");
+    const aSoon=a.due&&a.due<=t0, bSoon=b.due&&b.due<=t0;
+    if(aSoon!==bSoon) return aSoon?-1:1;
     if(b.prio!==a.prio) return b.prio-a.prio;
-    if((a.due||"9")!==(b.due||"9")) return (a.due||"9")<(b.due||"9")?-1:1;
+    if(ka!==kb) return ka<kb?-1:1;
     return b.created-a.created;
   });
 }
 function el(tag, attrs={}, ...kids){
   const n=document.createElement(tag);
   for(const [k,v] of Object.entries(attrs)){
+    if(v==null) continue;
     if(k==="class") n.className=v; else if(k.startsWith("on")) n.addEventListener(k.slice(2),v);
-    else if(k==="text") n.textContent=v; else n.setAttribute(k,v);
+    else if(k==="text") n.textContent=v; else if(k==="checked") n.checked=!!v; else if(k==="value") n.value=v; else n.setAttribute(k,v);
   }
   kids.flat().forEach(c=>c!=null&&n.append(c)); return n;
 }
 function render(){
-  const all=state.tasks, cnt=s=>all.filter(t=>t.status===s).length;
-  const late=all.filter(t=>t.status!=="done"&&t.due&&t.due<today()).length;
+  const all=state.tasks, cnt=s=>all.filter(t=>t.status===s).length, t0=today();
+  const late=all.filter(t=>t.status!=="done"&&t.due&&t.due<t0).length;
+  const todayN=all.filter(t=>t.status!=="done"&&t.due===t0).length;
   const tally=$("#tally"); tally.innerHTML="";
-  tally.append(el("b",{text:String(cnt("todo")+cnt("doing"))})," активных, ",el("b",{text:String(cnt("doing"))})," в работе, ",el("b",{text:String(cnt("done"))})," готово",
+  tally.append(el("b",{text:String(todayN)})," на сегодня, ",el("b",{text:String(cnt("todo")+cnt("doing"))})," активных, ",el("b",{text:String(cnt("done"))})," готово",
     late?el("span",{text:` — просрочено: ${late}`,style:"color:var(--hot)"}):null);
   const list=$("#list"); list.innerHTML="";
   const items=visible();
-  if(!items.length){ list.append(el("li",{class:"empty",text:all.length?"Ничего не найдено. Поменяйте фильтр или поиск.":"Задач пока нет. Добавьте первую в поле выше."})); return; }
+  if(!items.length){
+    const msg = all.length ? (filter==="today" ? "На сегодня задач нет." : "Ничего не найдено. Поменяйте фильтр или поиск.") : "Задач пока нет. Добавьте первую в поле выше.";
+    list.append(el("li",{class:"empty",text:msg})); 
+  }
   for(const t of items){
-    const isLate=t.status!=="done"&&t.due&&t.due<today();
-    const meta=el("span",{class:"meta"},el("span",{text:STATUS[t.status]}),t.project?el("span",{text:t.project}):null,
-      t.due?el("span",{class:isLate?"late":"",text:(isLate?"просрочено, ":"до ")+fmtDate(t.due)}):null,t.notes?el("span",{text:"есть заметка"}):null);
-    list.append(el("li",{class:"task"+(openId===t.id?" open":""),"data-status":t.status},
+    const isLate=t.status!=="done"&&t.due&&t.due<t0;
+    const cl=t.checklist||[], clDone=cl.filter(c=>c.done).length;
+    const meta=el("span",{class:"meta"},el("span",{text:STATUS[t.status]}),t.project?el("span",{text:"#"+t.project}):null,
+      t.due?el("span",{class:isLate?"late":"",text:(isLate?"просрочено: ":"")+fmtDate(t.due)+(t.time?", "+t.time:"")}):null,
+      cl.length?el("span",{text:`пункты ${clDone}/${cl.length}`}):null,
+      t.notes?el("span",{text:"есть заметка"}):null);
+    list.append(el("li",{class:"task"+(openId===t.id?" open":"")+(t.due===t0?" today":""),"data-status":t.status},
       el("div",{class:"row"},
         el("button",{class:"check",type:"button","aria-label":`Статус: ${STATUS[t.status]}. Нажмите, чтобы сменить`,onclick:()=>{t.status=NEXT[t.status]; t.doneAt=t.status==="done"?Date.now():null; saveTask(t);}}),
         el("button",{class:"row-main",type:"button","aria-expanded":String(openId===t.id),onclick:()=>{openId=openId===t.id?null:t.id; render();}},el("span",{class:"title",text:t.title}),meta),
         el("span",{class:"prio p"+t.prio,"aria-hidden":"true"})),
       editor(t)));
   }
+  if(refocus){ const n=document.querySelector(refocus); if(n) n.focus(); refocus=null; }
+}
+function checklist(t){
+  const save = () => saveTask(t);
+  const items = (t.checklist||[]).map((c,i)=>el("div",{class:"ci"+(c.done?" done":"")},
+    el("input",{type:"checkbox",checked:c.done,"aria-label":"Пункт выполнен",onchange:e=>{c.done=e.target.checked; save();}}),
+    el("input",{type:"text",value:c.text,"aria-label":"Текст пункта",onchange:e=>{const v=e.target.value.trim(); if(v){c.text=v;} else {t.checklist.splice(i,1);} save();}}),
+    el("button",{class:"x",type:"button","aria-label":"Удалить пункт",text:"×",onclick:()=>{t.checklist.splice(i,1); save();}})
+  ));
+  const inp = el("input",{type:"text",placeholder:"Новый пункт и Enter","data-cl":t.id,"aria-label":"Новый пункт чек-листа"});
+  const add = () => { const v=inp.value.trim(); if(!v) return; t.checklist=(t.checklist||[]).concat({id:uid(),text:v,done:false}); refocus=`[data-cl="${t.id}"]`; save(); };
+  inp.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); add(); } });
+  return el("div",{class:"checklist"},
+    el("span",{class:"cap",text:"Чек-лист"}), ...items,
+    el("div",{class:"ci-add"}, inp, el("button",{class:"ghost",type:"button",text:"+ Пункт",onclick:add})));
 }
 function editor(t){
   const upd=(k,v)=>{ t[k]=v; saveTask(t); };
@@ -233,27 +377,47 @@ function editor(t){
     el("label",{},"Статус",sel(STATUS,t.status,"status")),
     el("label",{},"Приоритет",sel({1:"Обычный",2:"Важно",3:"Срочно"},t.prio,"prio")),
     el("label",{},"Срок",el("input",{type:"date",value:t.due||"",onchange:e=>upd("due",e.target.value)})),
-    el("label",{},"Проект",el("input",{type:"text",value:t.project||"",placeholder:"Например, «Дом»",onchange:e=>upd("project",e.target.value.trim())})),
+    el("label",{},"Время",el("input",{type:"time",value:t.time||"",onchange:e=>upd("time",e.target.value)})),
+    el("label",{class:"wide"},"Проект",el("input",{type:"text",value:t.project||"",placeholder:"Например, «Дом»",onchange:e=>upd("project",e.target.value.trim().replace(/^#/,""))})),
+    checklist(t),
     el("label",{class:"wide"},"Заметки",el("textarea",{onchange:e=>upd("notes",e.target.value)},t.notes||"")),
     el("div",{class:"actions"},
       el("button",{class:"ghost danger",type:"button",onclick:()=>{ if(confirm(`Удалить задачу «${t.title}»?`)){ openId=null; removeTask(t.id); } },text:"Удалить"}),
-      el("button",{class:"ghost",type:"button",onclick:()=>{openId=null; render();},text:"Свернуть"})));
+      el("span",{style:"display:flex;gap:8px;flex-wrap:wrap"},
+        t.due ? el("button",{class:"ghost",type:"button",text:"В календарь",title:"Скачать событие с напоминанием для календаря телефона",onclick:()=>downloadIcs(t)}) : null,
+        el("button",{class:"ghost",type:"button",onclick:()=>{openId=null; render();},text:"Свернуть"}))));
 }
 
-// ---- Управление ----
+// ---------- Быстрый ввод ----------
+function showParsed(){
+  const raw=$("#newTitle").value, box=$("#parsed"); box.innerHTML="";
+  if(!raw.trim()){ box.append(el("span",{class:"hint-ex",text:"Можно писать сразу с датой: «завтра в 18:00 плавание», «в пятницу отчёт #работа», «25.12 подарки !»"})); return; }
+  const p=parseQuick(raw), parts=[];
+  if(p.due) parts.push(fmtDate(p.due)+(p.time?", "+p.time:""));
+  if(p.project) parts.push("#"+p.project);
+  if(p.prio) parts.push({1:"обычный",2:"важно",3:"срочно"}[p.prio]);
+  if(!parts.length) return;
+  box.append("Будет: ", el("b",{text:p.title||"(без названия)"}), " · ", parts.join(" · "));
+}
+$("#newTitle").addEventListener("input", showParsed);
+
 $("#addForm").addEventListener("submit", e=>{
   e.preventDefault();
-  const title=$("#newTitle").value.trim(); if(!title) return;
-  const t={id:uid(),title,status:"todo",prio:Number($("#newPrio").value),due:$("#newDue").value,project:"",notes:"",created:Date.now(),doneAt:null};
+  const raw=$("#newTitle").value.trim(); if(!raw) return;
+  const p=parseQuick(raw);
+  const title=p.title||raw;
+  const manualPrio=Number($("#newPrio").value), manualDue=$("#newDue").value;
+  const t=norm({id:uid(),title,status:"todo",prio:p.prio||manualPrio,due:manualDue||p.due,time:p.time,project:p.project,notes:"",checklist:[],created:Date.now(),doneAt:null});
   state.tasks.push(t);
-  $("#newTitle").value=""; $("#newDue").value=""; $("#newPrio").value="1";
-  if(filter==="done") setFilter("active");
+  $("#newTitle").value=""; $("#newDue").value=""; $("#newPrio").value="1"; showParsed();
+  if(filter==="done" || (filter==="today" && (!t.due || t.due>today()))) setFilter("active");
   saveTask(t); $("#newTitle").focus();
 });
 function setFilter(f){ filter=f; document.querySelectorAll(".tab").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.f===f))); render(); }
 document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>setFilter(b.dataset.f)));
 $("#search").addEventListener("input", e=>{ query=e.target.value; render(); });
 
+// ---------- Резервная копия ----------
 $("#exportBtn").addEventListener("click", ()=>{
   const a=el("a",{href:URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:"application/json"})),download:`zadachi-${today()}.json`});
   document.body.append(a); a.click(); a.remove();
@@ -267,15 +431,16 @@ $("#importFile").addEventListener("change", e=>{
     let d; try{ d=JSON.parse(r.result); if(!Array.isArray(d.tasks)) throw 0; }
     catch(err){ alert("Файл не похож на резервную копию трекера. Выберите файл .json, скачанный кнопкой «Скачать резервную копию»."); return; }
     if(!confirm(`Заменить текущие задачи (${state.tasks.length}) задачами из файла (${d.tasks.length})?`)) return;
-    state.tasks=d.tasks; render();
+    state.tasks=d.tasks.map(norm); render();
+    if(!db){ saveLocal(); return; }
     await run(()=>db.from("tasks").delete().neq("id",""));
-    if(d.tasks.length) await run(()=>db.from("tasks").insert(d.tasks.map(toRow)));
+    if(state.tasks.length) await run(()=>db.from("tasks").insert(state.tasks.map(toRow)));
   };
   r.readAsText(f);
 });
 
-// ---- Запуск ----
-const local=loadLocal(); if(local) state=local;
+// ---------- Запуск ----------
+const local=loadLocal(); if(local) state={tasks:local.tasks.map(norm)};
 render();
 if(!db){
   setStatus("local", configured ? "Не удалось загрузить Supabase — данные только в этом браузере" : "База не подключена — данные только в этом браузере");
@@ -285,6 +450,7 @@ if(!db){
   db.channel("tasks-live").on("postgres_changes",{event:"*",schema:"public",table:"tasks"},scheduleRefresh).subscribe();
   document.addEventListener("visibilitychange",()=>{ if(!document.hidden) scheduleRefresh(); });
 }
+setInterval(()=>{ if(!editing()) render(); }, 5*60*1000);
 </script>
 </body>
 </html>
